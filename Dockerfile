@@ -25,4 +25,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/mcp || exit 1
 
 # MCP sunucusunu başlat
-CMD ["python", "-m", "fastmcp", "run", "--host", "0.0.0.0", "--port", "8000", "mcp_server_main.py"]
+CMD ["python", "-m", "fastmcp", "run", "mcp_server_main:app", "--host", "0.0.0.0", "--port", "8000"]
