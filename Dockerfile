@@ -7,12 +7,14 @@ WORKDIR /app
 # Sistem paketlerini güncelle
 RUN apt-get update && apt-get install -y \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Proje dosyalarını kopyala
 COPY . .
 
-# Python bağımlılıklarını kur (önce requirements.txt'i kontrol et, yoksa manuel kur)
+# Python bağımlılıklarını kur
+RUN pip install --upgrade pip
 RUN pip install fastmcp httpx beautifulsoup4 markitdown pydantic aiohttp
 
 # Port'u aç
