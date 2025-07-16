@@ -226,4 +226,8 @@ async def mcp_endpoint(request: Request):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8001))
+<<<<<<< HEAD
     uvicorn.run(app, host="0.0.0.0", port=port)
+=======
+    uvicorn.run(app, host="0.0.0.0", port=port)
+>>>>>>> 7399c601cc289feccf15285253309ce0b8954627
