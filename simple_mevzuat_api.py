@@ -1,138 +1,229 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+import json
 import asyncio
-import sys
+from typing import Dict, Any
 import os
 
-# MCP sunucu fonksiyonlarını import et
-try:
-    from mevzuat_mcp_server import search_mevzuat, get_mevzuat_article_tree, get_mevzuat_article_content
-except ImportError:
-    # Fallback function if MCP server not available
-    async def search_mevzuat(**kwargs):
-        return {"error": "MCP server not available"}
-    
-    async def get_mevzuat_article_tree(mevzuat_id: str):
-        return {"error": "MCP server not available"}
-    
-    async def get_mevzuat_article_content(mevzuat_id: str, madde_id: str):
-        return {"error": "MCP server not available"}
+# MCP server'ı import et
+from mevzuat_mcp_server import server
 
-app = FastAPI(title="Mevzuat MCP API", version="1.0.0")
+app = FastAPI(title="Mevzuat MCP Server for n8n")
 
-# Request modelleri
-class SearchRequest(BaseModel):
-    query: str
-    mevzuat_adi: str = ""
-    mevzuat_no: str = ""
-    page_size: int = 10
-    page_number: int = 1
+# CORS ayarları
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-class ArticleTreeRequest(BaseModel):
-    mevzuat_id: str
+# SSE connection store
+connections: Dict[str, Any] = {}
 
-class ArticleContentRequest(BaseModel):
-    mevzuat_id: str
-    madde_id: str  # Parametre adını düzelttik
-
-# Ana endpoint
 @app.get("/")
-def root():
+async def root():
     return {
-        "message": "Mevzuat MCP API Working!",
+        "message": "Mevzuat MCP Server for n8n",
         "status": "online",
-        "service": "mevzuat",
         "endpoints": {
-            "search": "/webhook/search (POST)",
-            "article_tree": "/webhook/article-tree (POST)", 
-            "article_content": "/webhook/article-content (POST)",
-            "health": "/health (GET)"
+            "sse": "/sse",
+            "mcp": "/mcp"
         }
     }
 
-# n8n webhook endpoint'leri
-@app.post("/webhook/search")
-async def webhook_search(request: SearchRequest):
+@app.get("/sse")
+async def sse_endpoint(request: Request):
+    """SSE endpoint for n8n MCP Client Tool"""
+    
+    async def event_generator():
+        # MCP server capabilities
+        capabilities = {
+            "protocol": "mcp",
+            "version": "1.0",
+            "tools": [
+                {
+                    "name": "search_mevzuat",
+                    "description": "Search Turkish legislation",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "mevzuat_adi": {"type": "string"},
+                            "mevzuat_no": {"type": "string"},
+                            "page_size": {"type": "integer", "default": 10},
+                            "page_number": {"type": "integer", "default": 1}
+                        }
+                    }
+                },
+                {
+                    "name": "get_mevzuat_article_tree",
+                    "description": "Get article tree structure",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "mevzuat_id": {"type": "string"}
+                        },
+                        "required": ["mevzuat_id"]
+                    }
+                },
+                {
+                    "name": "get_mevzuat_article_content",
+                    "description": "Get article content",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "mevzuat_id": {"type": "string"},
+                            "madde_id": {"type": "string"}
+                        },
+                        "required": ["mevzuat_id", "madde_id"]
+                    }
+                }
+            ]
+        }
+        
+        # Send capabilities
+        yield f"data: {json.dumps(capabilities)}\n\n"
+        
+        # Keep connection alive
+        while True:
+            await asyncio.sleep(30)
+            yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
+@app.post("/mcp")
+async def mcp_endpoint(request: Request):
+    """MCP protocol endpoint"""
     try:
-        # MCP search fonksiyonunu çağır - gerçek parametreler
-        result = await search_mevzuat(
-            mevzuat_adi=request.mevzuat_adi or request.query,
-            mevzuat_no=request.mevzuat_no,
-            page_size=request.page_size,
-            page_number=request.page_number,
-            search_in_title=True,
-            sort_field="tarih",
-            sort_direction="desc"
-        )
+        data = await request.json()
+        
+        # Handle MCP protocol messages
+        if data.get("method") == "tools/list":
+            return {
+                "jsonrpc": "2.0",
+                "id": data.get("id"),
+                "result": {
+                    "tools": [
+                        {
+                            "name": "search_mevzuat",
+                            "description": "Search Turkish legislation",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "mevzuat_adi": {"type": "string"},
+                                    "mevzuat_no": {"type": "string"},
+                                    "page_size": {"type": "integer", "default": 10}
+                                }
+                            }
+                        },
+                        {
+                            "name": "get_mevzuat_article_tree",
+                            "description": "Get article tree structure",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "mevzuat_id": {"type": "string"}
+                                },
+                                "required": ["mevzuat_id"]
+                            }
+                        },
+                        {
+                            "name": "get_mevzuat_article_content",
+                            "description": "Get article content",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "mevzuat_id": {"type": "string"},
+                                    "madde_id": {"type": "string"}
+                                },
+                                "required": ["mevzuat_id", "madde_id"]
+                            }
+                        }
+                    ]
+                }
+            }
+        
+        elif data.get("method") == "tools/call":
+            # Handle tool calls
+            tool_name = data.get("params", {}).get("name")
+            arguments = data.get("params", {}).get("arguments", {})
+            
+            if tool_name == "search_mevzuat":
+                from mevzuat_mcp_server import search_mevzuat
+                result = await search_mevzuat(**arguments)
+                
+                return {
+                    "jsonrpc": "2.0",
+                    "id": data.get("id"),
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": json.dumps(result, ensure_ascii=False)
+                            }
+                        ]
+                    }
+                }
+            
+            elif tool_name == "get_mevzuat_article_tree":
+                from mevzuat_mcp_server import get_mevzuat_article_tree
+                result = await get_mevzuat_article_tree(**arguments)
+                
+                return {
+                    "jsonrpc": "2.0",
+                    "id": data.get("id"),
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": json.dumps(result, ensure_ascii=False)
+                            }
+                        ]
+                    }
+                }
+            
+            elif tool_name == "get_mevzuat_article_content":
+                from mevzuat_mcp_server import get_mevzuat_article_content
+                result = await get_mevzuat_article_content(**arguments)
+                
+                return {
+                    "jsonrpc": "2.0",
+                    "id": data.get("id"),
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": json.dumps(result, ensure_ascii=False)
+                            }
+                        ]
+                    }
+                }
         
         return {
-            "success": True,
-            "data": result,
-            "query": request.query
+            "jsonrpc": "2.0",
+            "id": data.get("id"),
+            "error": {"code": -32601, "message": "Method not found"}
         }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "query": request.query
-        }
-
-@app.post("/webhook/article-tree")
-async def webhook_article_tree(request: ArticleTreeRequest):
-    try:
-        result = await get_mevzuat_article_tree(mevzuat_id=request.mevzuat_id)
         
-        return {
-            "success": True,
-            "data": result,
-            "mevzuat_id": request.mevzuat_id
-        }
     except Exception as e:
         return {
-            "success": False,
-            "error": str(e),
-            "mevzuat_id": request.mevzuat_id
+            "jsonrpc": "2.0",
+            "id": data.get("id", 1),
+            "error": {"code": -32603, "message": str(e)}
         }
 
-@app.post("/webhook/article-content")
-async def webhook_article_content(request: ArticleContentRequest):
-    try:
-        result = await get_mevzuat_article_content(
-            mevzuat_id=request.mevzuat_id,
-            madde_id=request.madde_id  # Parametre adını düzelttik
-        )
-        
-        return {
-            "success": True,
-            "data": result,
-            "mevzuat_id": request.mevzuat_id,
-            "madde_id": request.madde_id
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "mevzuat_id": request.mevzuat_id
-        }
-
-# Eski test endpoint'leri (geriye uyumluluk için)
-@app.get("/search")
-def search_test():
-    return {
-        "message": "Test endpoint - POST /webhook/search kullanın",
-        "example": {
-            "method": "POST",
-            "url": "/webhook/search",
-            "body": {"query": "iş kanunu"}
-        }
-    }
-
-@app.get("/health")
-def health():
-    return {"status": "healthy", "service": "mevzuat"}
-
-# Sunucu başlatma
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8001))  # Render PORT veya 8001
+    port = int(os.environ.get("PORT", 8001))
     uvicorn.run(app, host="0.0.0.0", port=port)
