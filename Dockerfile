@@ -20,8 +20,8 @@ COPY . .
 # Environment variables
 ENV PYTHONUNBUFFERED=1
 
-# Expose port 8001 for Mevzuat API
-EXPOSE 8001
+# Expose port 8002 for Mevzuat API
+EXPOSE 8002
 
 # Start the Mevzuat API
-CMD ["uvicorn", "simple_mevzuat_api:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uvicorn", "simple_mevzuat_api:app", "--host", "0.0.0.0", "--port", "8002"]
