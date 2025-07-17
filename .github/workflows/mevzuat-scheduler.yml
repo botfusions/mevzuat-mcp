@@ -1,4 +1,4 @@
-name: Mevzuat API Test
+name: Mevzuat API for Lovable
 
 on:
   schedule:
@@ -6,14 +6,25 @@ on:
   workflow_dispatch:
 
 jobs:
-  test-api:
+  save-results:
     runs-on: ubuntu-latest
     steps:
-      - name: Test Mevzuat API
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Call API & Save
         run: |
-          echo "Testing Mevzuat API..."
+          mkdir -p public
           curl -X POST \
             -H "Content-Type: application/json" \
-            -d '{"query": "github actions test", "page_size": 5}' \
-            https://mevzuat-mcp-2z26.onrender.com/webhook/search
-          echo "API test completed"
+            -d '{"query": "güncel mevzuat", "page_size": 10}' \
+            https://mevzuat-mcp-2z26.onrender.com/webhook/search \
+            > public/mevzuat-data.json
+            
+      - name: Commit Results
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add public/mevzuat-data.json
+          git commit -m "Update mevzuat data: $(date)" || exit 0
+          git push
