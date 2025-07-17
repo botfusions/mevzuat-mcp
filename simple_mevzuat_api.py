@@ -15,32 +15,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# MCP import güvenli hale getir
+# MCP import - GERÇEK DATA İÇİN
 try:
     from mevzuat_mcp_server import search_mevzuat, get_mevzuat_article_tree, get_mevzuat_article_content
     MCP_AVAILABLE = True
-except ImportError:
+    print("✅ MCP Server başarıyla yüklendi - Gerçek data aktif")
+except ImportError as e:
+    print(f"❌ MCP Server yüklenemedi: {e}")
     MCP_AVAILABLE = False
     
-    async def search_mevzuat(**kwargs):
+    # Fallback fonksiyonlar (gerçek data bulunamadığında)
+    async def search_mevzuat(mevzuat_adi: str = "", page_size: int = 10, **kwargs):
         return {
             "results": [
-                {"id": "test1", "title": "Test İş Kanunu", "url": "test1.html"},
-                {"id": "test2", "title": "Test Borçlar Kanunu", "url": "test2.html"}
+                {
+                    "id": "fallback_1", 
+                    "title": f"MCP bulunamadı - arama: {mevzuat_adi}",
+                    "url": "https://mevzuat.gov.tr",
+                    "type": "fallback"
+                }
             ],
-            "total_count": 2
+            "total_count": 1,
+            "status": "fallback_mode"
         }
     
     async def get_mevzuat_article_tree(mevzuat_id: str):
-        return [{"id": "art1", "title": "Test Madde 1"}]
+        return [{"id": "fallback_tree", "title": "MCP bulunamadı"}]
     
     async def get_mevzuat_article_content(mevzuat_id: str, madde_id: str):
-        return {"content": "Test madde içeriği"}
+        return {"content": "MCP bulunamadı"}
 
 # Request models
 class SearchRequest(BaseModel):
     query: str
     page_size: int = 10
+    mevzuat_turleri: list = []
+    resmi_gazete_sayisi: str = ""
+    search_in_title: bool = True
 
 @app.get("/")
 def root():
@@ -48,27 +59,133 @@ def root():
         "message": "Mevzuat MCP Server for n8n",
         "status": "online",
         "mcp_available": MCP_AVAILABLE,
+        "mcp_status": "REAL_DATA" if MCP_AVAILABLE else "FALLBACK_MODE",
         "endpoints": {
             "search": "/search (GET)",
             "webhook_search": "/webhook/search (POST)",
-            "sse": "/sse",
-            "mcp": "/mcp"
+            "article_tree": "/webhook/article-tree (POST)",
+            "article_content": "/webhook/article-content (POST)"
         }
     }
 
 @app.get("/search")
-async def simple_search(q: str = "test"):
-    result = await search_mevzuat(mevzuat_adi=q, page_size=5)
-    return {"success": True, "data": result, "mcp_available": MCP_AVAILABLE}
+async def simple_search(q: str = "güncel mevzuat", page_size: int = 10):
+    try:
+        # Gerçek MCP fonksiyonunu çağır
+        result = await search_mevzuat(
+            mevzuat_adi=q,
+            page_size=page_size,
+            search_in_title=True
+        )
+        
+        return {
+            "success": True, 
+            "data": result, 
+            "mcp_available": MCP_AVAILABLE,
+            "mode": "REAL_DATA" if MCP_AVAILABLE else "FALLBACK"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "mcp_available": MCP_AVAILABLE
+        }
 
 @app.post("/webhook/search")
 async def webhook_search(request: SearchRequest):
-    result = await search_mevzuat(mevzuat_adi=request.query, page_size=request.page_size)
-    return {"success": True, "data": result, "query": request.query}
+    try:
+        # Gerçek MCP search fonksiyonunu çağır
+        result = await search_mevzuat(
+            mevzuat_adi=request.query,
+            page_size=request.page_size,
+            search_in_title=request.search_in_title,
+            mevzuat_turleri=request.mevzuat_turleri or [],
+            resmi_gazete_sayisi=request.resmi_gazete_sayisi or ""
+        )
+        
+        return {
+            "success": True,
+            "data": result,
+            "query": request.query,
+            "mcp_available": MCP_AVAILABLE,
+            "mode": "REAL_DATA" if MCP_AVAILABLE else "FALLBACK"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "query": request.query,
+            "mcp_available": MCP_AVAILABLE
+        }
+
+@app.post("/webhook/article-tree")
+async def webhook_article_tree(request: dict):
+    try:
+        result = await get_mevzuat_article_tree(request.get("mevzuat_id"))
+        return {
+            "success": True,
+            "data": result,
+            "mcp_available": MCP_AVAILABLE
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "mcp_available": MCP_AVAILABLE
+        }
+
+@app.post("/webhook/article-content")
+async def webhook_article_content(request: dict):
+    try:
+        result = await get_mevzuat_article_content(
+            request.get("mevzuat_id"),
+            request.get("madde_id")
+        )
+        return {
+            "success": True,
+            "data": result,
+            "mcp_available": MCP_AVAILABLE
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "mcp_available": MCP_AVAILABLE
+        }
 
 @app.get("/health")
 def health():
-    return {"status": "healthy", "mcp": MCP_AVAILABLE}
+    return {
+        "status": "healthy", 
+        "mcp": MCP_AVAILABLE,
+        "mode": "REAL_DATA" if MCP_AVAILABLE else "FALLBACK"
+    }
+
+# GitHub Actions için özel endpoint
+@app.get("/github-actions-test")
+async def github_actions_test():
+    """GitHub Actions için optimize edilmiş endpoint"""
+    try:
+        result = await search_mevzuat(
+            mevzuat_adi="güncel mevzuat",
+            page_size=20,
+            search_in_title=True
+        )
+        
+        return {
+            "success": True,
+            "data": result,
+            "query": "güncel mevzuat",
+            "timestamp": "2025-07-17",
+            "source": "github_actions",
+            "mcp_available": MCP_AVAILABLE
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "mcp_available": MCP_AVAILABLE
+        }
 
 if __name__ == "__main__":
     import uvicorn
