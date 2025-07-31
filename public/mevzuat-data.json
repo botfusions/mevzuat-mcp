@@ -1,1 +1,7 @@
-{"success":true,"data":{"results":[{"id":"fallback_001","title":"[FALLBACK] güncel mevzuat - 4857 Sayılı İş Kanunu","url":"https://mevzuat.gov.tr/MevzuatMetin/1.5.4857.pdf","type":"kanun","status":"fallback_mode"},{"id":"fallback_002","title":"[FALLBACK] güncel mevzuat - 6098 Sayılı Türk Borçlar Kanunu","url":"https://mevzuat.gov.tr/MevzuatMetin/1.5.6098.pdf","type":"kanun","status":"fallback_mode"}],"total_count":2,"status":"fallback_mode","note":"MCP server bulunamadı - fallback data"},"query":"güncel mevzuat","mcp_available":false,"mode":"FALLBACK"}
+<html>
+<head><title>502 Bad Gateway</title></head>
+<body>
+<center><h1>502 Bad Gateway</h1></center>
+<hr><center>cloudflare</center>
+</body>
+</html>
